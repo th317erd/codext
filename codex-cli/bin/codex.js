@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Unified entry point for the Codex CLI.
+// Unified entry point for the Codext CLI.
 
 import { spawn } from "node:child_process";
 import { existsSync, realpathSync } from "fs";
@@ -14,12 +14,12 @@ const require = createRequire(import.meta.url);
 const codexPackageRoot = realpathSync(path.join(__dirname, ".."));
 
 const PLATFORM_PACKAGE_BY_TARGET = {
-  "x86_64-unknown-linux-musl": "@openai/codex-linux-x64",
-  "aarch64-unknown-linux-musl": "@openai/codex-linux-arm64",
-  "x86_64-apple-darwin": "@openai/codex-darwin-x64",
-  "aarch64-apple-darwin": "@openai/codex-darwin-arm64",
-  "x86_64-pc-windows-msvc": "@openai/codex-win32-x64",
-  "aarch64-pc-windows-msvc": "@openai/codex-win32-arm64",
+  "x86_64-unknown-linux-musl": "@loongphy/codext-linux-x64",
+  "aarch64-unknown-linux-musl": "@loongphy/codext-linux-arm64",
+  "x86_64-apple-darwin": "@loongphy/codext-darwin-x64",
+  "aarch64-apple-darwin": "@loongphy/codext-darwin-arm64",
+  "x86_64-pc-windows-msvc": "@loongphy/codext-win32-x64",
+  "aarch64-pc-windows-msvc": "@loongphy/codext-win32-arm64",
 };
 
 const { platform, arch } = process;
@@ -98,12 +98,12 @@ function findCodexExecutable() {
   const packageManager = detectPackageManager();
   const updateCommand =
     packageManager === "bun"
-      ? "bun install -g @openai/codex@latest"
+      ? "bun install -g @loongphy/codext@latest"
       : packageManager === "pnpm"
-        ? "pnpm add -g @openai/codex@latest"
-        : "npm install -g @openai/codex@latest";
+        ? "pnpm add -g @loongphy/codext@latest"
+        : "npm install -g @loongphy/codext@latest";
   throw new Error(
-    `Missing optional dependency ${platformPackage}. Reinstall Codex: ${updateCommand}`,
+    `Missing optional dependency ${platformPackage}. Reinstall Codext: ${updateCommand}`,
   );
 }
 
@@ -120,18 +120,23 @@ function isPnpmOwnedCodexInstall(nodeModulesDir) {
     return false;
   }
 
-  try {
-    return (
-      realpathSync(path.join(nodeModulesDir, "@openai", "codex")) ===
-      codexPackageRoot
-    );
-  } catch {
-    return false;
+  for (const packagePath of [
+    path.join(nodeModulesDir, "@loongphy", "codext"),
+    path.join(nodeModulesDir, "@openai", "codex"),
+  ]) {
+    try {
+      if (realpathSync(packagePath) === codexPackageRoot) {
+        return true;
+      }
+    } catch {
+      // Keep checking possible package names.
+    }
   }
+  return false;
 }
 
 /**
- * Use heuristics to detect the package manager that was used to install Codex
+ * Use heuristics to detect the package manager that was used to install Codext
  * in order to give the user a hint about how to update it.
  */
 function detectPackageManager() {
