@@ -31,6 +31,8 @@ use crate::render::renderable::Renderable;
 use crate::style::user_message_style;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::terminal_hyperlinks::mark_buffer_hyperlinks;
+use crate::terminal_hyperlinks::sanitize_hyperlink_lines_for_reflow;
+use crate::terminal_hyperlinks::sanitize_lines_for_reflow;
 use crate::terminal_hyperlinks::visible_lines_ref;
 use crate::tui;
 use crate::tui::TuiEvent;
@@ -398,7 +400,8 @@ struct CellRenderable {
 
 impl Renderable for CellRenderable {
     fn render(&self, area: Rect, buf: &mut Buffer) {
-        let hyperlink_lines = self.cell.transcript_hyperlink_lines(area.width);
+        let hyperlink_lines =
+            sanitize_hyperlink_lines_for_reflow(self.cell.transcript_hyperlink_lines(area.width));
         let style = if self.cell.as_any().is::<UserHistoryCell>() {
             if self.highlighted {
                 user_message_style().reversed()
@@ -426,14 +429,16 @@ struct HyperlinkLinesRenderable {
 
 impl Renderable for HyperlinkLinesRenderable {
     fn render(&self, area: Rect, buf: &mut Buffer) {
-        Paragraph::new(Text::from(visible_lines_ref(&self.lines)))
+        let lines = sanitize_hyperlink_lines_for_reflow(self.lines.clone());
+        Paragraph::new(Text::from(visible_lines_ref(&lines)))
             .wrap(Wrap { trim: false })
             .render(area, buf);
-        mark_buffer_hyperlinks(buf, area, &self.lines, /*scroll_rows*/ 0);
+        mark_buffer_hyperlinks(buf, area, &lines, /*scroll_rows*/ 0);
     }
 
     fn desired_height(&self, width: u16) -> u16 {
-        Paragraph::new(Text::from(visible_lines_ref(&self.lines)))
+        let lines = sanitize_hyperlink_lines_for_reflow(self.lines.clone());
+        Paragraph::new(Text::from(visible_lines_ref(&lines)))
             .wrap(Wrap { trim: false })
             .line_count(width)
             .try_into()
@@ -825,6 +830,7 @@ impl StaticOverlay {
         title: String,
         keymap: PagerKeymap,
     ) -> Self {
+        let lines = sanitize_lines_for_reflow(lines);
         let paragraph = Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false });
         Self::with_renderables(
             vec![Box::new(CachedRenderable::new(paragraph))],

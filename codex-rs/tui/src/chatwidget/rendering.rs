@@ -71,7 +71,9 @@ struct TranscriptAreaRenderable<'a> {
 impl Renderable for TranscriptAreaRenderable<'_> {
     fn render(&self, area: Rect, buf: &mut Buffer) {
         let area = self.child_area(area);
-        let lines = self.child.display_lines(area.width);
+        let lines = crate::terminal_hyperlinks::sanitize_lines_for_reflow(
+            self.child.display_lines(area.width),
+        );
         let paragraph = Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false });
         let y = if area.height == 0 {
             0

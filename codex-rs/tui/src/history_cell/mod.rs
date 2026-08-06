@@ -36,6 +36,8 @@ use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::terminal_hyperlinks::mark_buffer_hyperlinks;
 use crate::terminal_hyperlinks::plain_hyperlink_lines;
 use crate::terminal_hyperlinks::prefix_hyperlink_lines;
+use crate::terminal_hyperlinks::sanitize_hyperlink_lines_for_reflow;
+use crate::terminal_hyperlinks::sanitize_lines_for_reflow;
 use crate::terminal_hyperlinks::visible_lines;
 use crate::terminal_hyperlinks::visible_lines_ref;
 #[cfg(test)]
@@ -230,7 +232,8 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
     }
 
     fn desired_height_for_mode(&self, width: u16, mode: HistoryRenderMode) -> u16 {
-        Paragraph::new(Text::from(self.display_lines_for_mode(width, mode)))
+        let lines = sanitize_lines_for_reflow(self.display_lines_for_mode(width, mode));
+        Paragraph::new(Text::from(lines))
             .wrap(Wrap { trim: false })
             .line_count(width)
             .try_into()
@@ -261,7 +264,9 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
     /// `desired_height`. Contains a workaround for a ratatui bug where
     /// a single whitespace-only line reports 2 rows instead of 1.
     fn desired_transcript_height(&self, width: u16) -> u16 {
-        let lines = visible_lines(self.transcript_hyperlink_lines(width));
+        let lines = visible_lines(sanitize_hyperlink_lines_for_reflow(
+            self.transcript_hyperlink_lines(width),
+        ));
         // Workaround: ratatui's line_count returns 2 for a single
         // whitespace-only line. Clamp to 1 in that case.
         if let [line] = &lines[..]
@@ -309,7 +314,8 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
 
 impl Renderable for Box<dyn HistoryCell> {
     fn render(&self, area: Rect, buf: &mut Buffer) {
-        let hyperlink_lines = self.display_hyperlink_lines(area.width);
+        let hyperlink_lines =
+            sanitize_hyperlink_lines_for_reflow(self.display_hyperlink_lines(area.width));
         let lines = visible_lines_ref(&hyperlink_lines);
         let paragraph = Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false });
         let y = if area.height == 0 {
