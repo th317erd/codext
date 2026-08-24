@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import tomllib
 from pathlib import Path
 
@@ -27,6 +28,12 @@ RUSTY_V8_CHECKSUMS_DIR = ROOT / "third_party" / "v8"
 RELEASE_ARTIFACT_PROFILE = "release"
 SANDBOX_ARTIFACT_PROFILE = "ptrcomp_sandbox_release"
 ARTIFACT_BAZEL_CONFIGS = ["rusty-v8-upstream-libcxx"]
+MUSL_RUNTIME_ARCHIVE_LABELS = [
+    "@llvm//runtimes/libcxx:libcxx.static",
+    "@llvm//runtimes/libcxx:libcxxabi.static",
+]
+LLVM_AR_LABEL = "@llvm//tools:llvm-ar"
+LLVM_RANLIB_LABEL = "@llvm//tools:llvm-ranlib"
 
 
 def bazel_execroot() -> Path:
@@ -125,6 +132,23 @@ def ensure_bazel_output_files(
     return outputs
 
 
+def single_bazel_output_file(
+    platform: str,
+    label: str,
+    compilation_mode: str = "fastbuild",
+    bazel_configs: list[str] | None = None,
+) -> Path:
+    outputs = ensure_bazel_output_files(
+        platform,
+        [label],
+        compilation_mode,
+        bazel_configs,
+    )
+    if len(outputs) != 1:
+        raise SystemExit(f"expected exactly one output for {label}, found {outputs}")
+    return outputs[0]
+
+
 def artifact_bazel_configs(bazel_configs: list[str] | None = None) -> list[str]:
     configured = list(ARTIFACT_BAZEL_CONFIGS)
     for config in bazel_configs or []:
@@ -212,6 +236,55 @@ def staged_checksums_name(target: str, artifact_profile: str) -> str:
     return f"rusty_v8_{artifact_profile}_{target}.sha256"
 
 
+def is_musl_archive_target(target: str, source_path: Path) -> bool:
+    return target.endswith("-unknown-linux-musl") and source_path.suffix == ".a"
+
+
+def merged_musl_archive(
+    platform: str,
+    lib_path: Path,
+    compilation_mode: str = "fastbuild",
+    bazel_configs: list[str] | None = None,
+) -> Path:
+    llvm_ar = single_bazel_output_file(
+        platform,
+        LLVM_AR_LABEL,
+        compilation_mode,
+        bazel_configs,
+    )
+    llvm_ranlib = single_bazel_output_file(
+        platform,
+        LLVM_RANLIB_LABEL,
+        compilation_mode,
+        bazel_configs,
+    )
+    runtime_archives = [
+        single_bazel_output_file(platform, label, compilation_mode, bazel_configs)
+        for label in MUSL_RUNTIME_ARCHIVE_LABELS
+    ]
+
+    temp_dir = Path(tempfile.mkdtemp(prefix="rusty-v8-musl-stage-"))
+    merged_archive = temp_dir / lib_path.name
+    merge_commands = "\n".join(
+        [
+            f"create {merged_archive}",
+            f"addlib {lib_path}",
+            *[f"addlib {archive}" for archive in runtime_archives],
+            "save",
+            "end",
+        ]
+    )
+    subprocess.run(
+        [str(llvm_ar), "-M"],
+        cwd=ROOT,
+        check=True,
+        input=merge_commands,
+        text=True,
+    )
+    subprocess.run([str(llvm_ranlib), str(merged_archive)], cwd=ROOT, check=True)
+    return merged_archive
+
+
 def stage_artifacts(
     target: str,
     lib_path: Path,
@@ -245,7 +318,7 @@ def stage_artifacts(
     shutil.copyfile(binding_path, staged_binding)
 
     staged_checksums = output_dir / staged_checksums_name(target, artifact_profile)
-    with staged_checksums.open("w", encoding="utf-8", newline="\n") as checksums:
+    with staged_checksums.open("w", encoding="utf-8") as checksums:
         for path in [staged_library, staged_binding]:
             digest = hashlib.sha256()
             with path.open("rb") as artifact:
@@ -308,7 +381,13 @@ def stage_release_pair(
     except StopIteration as exc:
         raise SystemExit(f"missing Rust binding output for {target}") from exc
 
-    stage_artifacts(target, lib_path, binding_path, output_dir, sandbox)
+    source_archive = (
+        merged_musl_archive(platform, lib_path, compilation_mode, bazel_configs)
+        if is_musl_archive_target(target, lib_path)
+        else lib_path
+    )
+
+    stage_artifacts(target, source_archive, binding_path, output_dir, sandbox)
 
 
 def parse_args() -> argparse.Namespace:
