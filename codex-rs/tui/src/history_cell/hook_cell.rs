@@ -19,6 +19,7 @@ use crate::motion::activity_indicator;
 use crate::motion::shimmer_text;
 use crate::render::line_utils::push_owned_lines;
 use crate::render::renderable::Renderable;
+use crate::terminal_hyperlinks::sanitize_lines_for_reflow;
 use crate::ui_consts::TRANSCRIPT_HINT;
 use crate::wrapping::RtOptions;
 use crate::wrapping::word_wrap_line;
@@ -381,7 +382,7 @@ impl HistoryCell for HookCell {
 
 impl Renderable for HookCell {
     fn render(&self, area: Rect, buf: &mut Buffer) {
-        let lines = self.display_lines(area.width);
+        let lines = sanitize_lines_for_reflow(self.display_lines(area.width));
         let paragraph = Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false });
         paragraph.render(area, buf);
     }

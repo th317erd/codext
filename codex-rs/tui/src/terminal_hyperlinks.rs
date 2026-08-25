@@ -28,6 +28,9 @@ use crate::width::display_width;
 use crate::wrapping::RtOptions;
 use crate::wrapping::adaptive_wrap_line;
 
+const MAX_REFLOW_TOKEN_BYTES: usize = 8 * 1024;
+const MAX_REFLOW_LINE_BYTES: usize = 30 * 1024;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct TerminalHyperlink {
     pub(crate) columns: Range<usize>,
@@ -137,6 +140,124 @@ pub(crate) fn visible_lines_ref(lines: &[HyperlinkLine]) -> Vec<Line<'_>> {
         .iter()
         .map(|line| line_to_borrowed(&line.line))
         .collect()
+}
+
+pub(crate) fn sanitize_hyperlink_lines_for_reflow(
+    lines: Vec<HyperlinkLine>,
+) -> Vec<HyperlinkLine> {
+    lines
+        .into_iter()
+        .map(|mut hyperlink_line| {
+            let (line, sanitized) = sanitize_line_for_reflow(hyperlink_line.line);
+            hyperlink_line.line = line;
+            if sanitized {
+                hyperlink_line.hyperlinks.clear();
+            }
+            hyperlink_line
+        })
+        .collect()
+}
+
+pub(crate) fn sanitize_lines_for_reflow(lines: Vec<Line<'static>>) -> Vec<Line<'static>> {
+    lines
+        .into_iter()
+        .map(|line| sanitize_line_for_reflow(line).0)
+        .collect()
+}
+
+fn sanitize_line_for_reflow(line: Line<'static>) -> (Line<'static>, bool) {
+    let Some((reason, line_bytes)) = reflow_unsafe_reason(&line) else {
+        return (line, false);
+    };
+
+    let Line {
+        style,
+        alignment,
+        spans,
+    } = line;
+    let span_style = spans.first().map(|span| span.style).unwrap_or_default();
+    let message = match reason {
+        ReflowUnsafeReason::DataUrl => {
+            format!("[data URL omitted from display: {line_bytes} bytes]")
+        }
+        ReflowUnsafeReason::LongToken => {
+            format!("[long token omitted from display: {line_bytes} bytes]")
+        }
+        ReflowUnsafeReason::LongLine => {
+            format!("[long line omitted from display: {line_bytes} bytes]")
+        }
+    };
+
+    (
+        Line {
+            style,
+            alignment,
+            spans: vec![Span::styled(message, span_style)],
+        },
+        true,
+    )
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ReflowUnsafeReason {
+    DataUrl,
+    LongToken,
+    LongLine,
+}
+
+fn reflow_unsafe_reason(line: &Line<'_>) -> Option<(ReflowUnsafeReason, usize)> {
+    let line_bytes = line
+        .spans
+        .iter()
+        .map(|span| span.content.as_ref().len())
+        .sum();
+
+    let mut token_bytes = 0usize;
+    for span in &line.spans {
+        let text = span.content.as_ref();
+        for token in text.split_ascii_whitespace() {
+            if is_data_url_token(token) {
+                return Some((ReflowUnsafeReason::DataUrl, line_bytes));
+            }
+        }
+        for byte in text.bytes() {
+            if byte.is_ascii_whitespace() {
+                token_bytes = 0;
+            } else {
+                token_bytes += 1;
+                if token_bytes > MAX_REFLOW_TOKEN_BYTES {
+                    return Some((ReflowUnsafeReason::LongToken, line_bytes));
+                }
+            }
+        }
+    }
+
+    (line_bytes > MAX_REFLOW_LINE_BYTES)
+        .then_some((ReflowUnsafeReason::LongLine, line_bytes))
+}
+
+fn is_data_url_token(token: &str) -> bool {
+    let token = token.trim_matches(|ch: char| {
+        matches!(
+            ch,
+            '(' | ')'
+                | '['
+                | ']'
+                | '{'
+                | '}'
+                | '<'
+                | '>'
+                | ','
+                | '.'
+                | ';'
+                | '!'
+                | '\''
+                | '"'
+        )
+    });
+    token
+        .get(..5)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("data:"))
 }
 
 pub(crate) fn plain_hyperlink_lines(lines: Vec<Line<'static>>) -> Vec<HyperlinkLine> {

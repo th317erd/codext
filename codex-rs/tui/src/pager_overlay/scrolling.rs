@@ -8,6 +8,7 @@ use crate::render::renderable::Renderable;
 use crate::style::user_message_style;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::terminal_hyperlinks::mark_buffer_hyperlinks;
+use crate::terminal_hyperlinks::sanitize_hyperlink_lines_for_reflow;
 use crate::terminal_hyperlinks::visible_lines_ref;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -30,7 +31,8 @@ impl Renderable for CellRenderable {
 
     /// Scroll visible text and hyperlink metadata together without rendering hidden rows.
     fn render_scrolled(&self, area: Rect, buf: &mut Buffer, scroll_offset: u16) -> bool {
-        let hyperlink_lines = self.cell.transcript_hyperlink_lines(area.width);
+        let hyperlink_lines =
+            sanitize_hyperlink_lines_for_reflow(self.cell.transcript_hyperlink_lines(area.width));
         let style = if self.cell.as_any().is::<UserHistoryCell>() {
             if self.highlighted {
                 user_message_style().reversed()
@@ -66,16 +68,18 @@ impl Renderable for HyperlinkLinesRenderable {
 
     /// Keep live-tail hyperlinks aligned with the same visible rows as their text.
     fn render_scrolled(&self, area: Rect, buf: &mut Buffer, scroll_offset: u16) -> bool {
-        Paragraph::new(Text::from(visible_lines_ref(&self.lines)))
+        let lines = sanitize_hyperlink_lines_for_reflow(self.lines.clone());
+        Paragraph::new(Text::from(visible_lines_ref(&lines)))
             .wrap(Wrap { trim: false })
             .scroll((scroll_offset, 0))
             .render(area, buf);
-        mark_buffer_hyperlinks(buf, area, &self.lines, usize::from(scroll_offset));
+        mark_buffer_hyperlinks(buf, area, &lines, usize::from(scroll_offset));
         true
     }
 
     fn desired_height(&self, width: u16) -> u16 {
-        Paragraph::new(Text::from(visible_lines_ref(&self.lines)))
+        let lines = sanitize_hyperlink_lines_for_reflow(self.lines.clone());
+        Paragraph::new(Text::from(visible_lines_ref(&lines)))
             .wrap(Wrap { trim: false })
             .line_count(width)
             .try_into()
