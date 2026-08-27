@@ -83,6 +83,8 @@ fi
 echo '# Snapshot file'
 echo '# Unset all aliases to avoid conflicts with functions'
 unalias -a 2>/dev/null || true
+echo '# Parser options required for captured bash functions'
+echo 'shopt -s extglob 2>/dev/null || true'
 echo '# Functions'
 declare -f
 echo ''
@@ -91,6 +93,13 @@ bash_opt_count=$(printf '%s\n' "$bash_opts" | sed '/^$/d' | wc -l | tr -d ' ')
 echo "# setopts $bash_opt_count"
 if [ -n "$bash_opts" ]; then
   printf 'set -o %s\n' $bash_opts
+fi
+echo ''
+shopt_lines=$(shopt -p)
+shopt_count=$(printf '%s\n' "$shopt_lines" | sed '/^$/d' | wc -l | tr -d ' ')
+echo "# shopts $shopt_count"
+if [ -n "$shopt_lines" ]; then
+  printf '%s\n' "$shopt_lines"
 fi
 echo ''
 alias_count=$(alias -p | wc -l | tr -d ' ')
