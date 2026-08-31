@@ -8,6 +8,7 @@ use crate::render::renderable::Renderable;
 use crate::style::user_message_style;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::terminal_hyperlinks::HyperlinkParagraph;
+use crate::terminal_hyperlinks::sanitize_hyperlink_lines_for_reflow;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
@@ -26,7 +27,8 @@ impl Renderable for CellRenderable {
 
     /// Scroll visible text and hyperlink metadata together without rendering hidden rows.
     fn render_scrolled(&self, area: Rect, buf: &mut Buffer, scroll_offset: u16) -> bool {
-        let hyperlink_lines = self.cell.transcript_hyperlink_lines(area.width);
+        let hyperlink_lines =
+            sanitize_hyperlink_lines_for_reflow(self.cell.transcript_hyperlink_lines(area.width));
         let style = if self.cell.as_any().is::<UserHistoryCell>() {
             if self.highlighted {
                 user_message_style().reversed()
@@ -59,14 +61,16 @@ impl Renderable for HyperlinkLinesRenderable {
 
     /// Keep live-tail hyperlinks aligned with the same visible rows as their text.
     fn render_scrolled(&self, area: Rect, buf: &mut Buffer, scroll_offset: u16) -> bool {
-        HyperlinkParagraph::new(&self.lines, Style::default())
+        let lines = sanitize_hyperlink_lines_for_reflow(self.lines.clone());
+        HyperlinkParagraph::new(&lines, Style::default())
             .scroll(scroll_offset)
             .render(area, buf);
         true
     }
 
     fn desired_height(&self, width: u16) -> u16 {
-        HyperlinkParagraph::new(&self.lines, Style::default())
+        let lines = sanitize_hyperlink_lines_for_reflow(self.lines.clone());
+        HyperlinkParagraph::new(&lines, Style::default())
             .line_count(width)
             .try_into()
             .unwrap_or(/*default*/ 0)

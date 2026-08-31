@@ -16,6 +16,7 @@ use tracing::warn;
 
 const INITIAL_CONNECTION_RETRY_DELAY: Duration = Duration::from_secs(5);
 const MAX_CONNECTION_RETRY_DELAY: Duration = Duration::from_secs(60);
+const SERVER_OVERLOADED_RETRY_DELAY: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ResponsesStreamRequest {
@@ -54,6 +55,27 @@ pub(crate) async fn handle_retryable_response_stream_error(
         ResponsesStreamRequest::Sampling => RetryOperation::Sampling,
         ResponsesStreamRequest::RemoteCompactionV2 => RetryOperation::RemoteCompactionV2,
     };
+
+    if matches!(err.details(), CodexErrorDetails::ServerOverloaded) {
+        retry_state.retries = retry_state.retries.saturating_add(1);
+        let retry_count = retry_state.retries;
+        let delay = SERVER_OVERLOADED_RETRY_DELAY;
+        warn!(
+            turn_id = %turn_context.sub_id,
+            retries = retry_count,
+            response_error = %err,
+            "selected model is at capacity; retrying Responses request in {delay:?}"
+        );
+        sess.notify_stream_error(
+            turn_context,
+            "Selected model is at capacity; retrying in 1s",
+            err,
+        )
+        .await;
+        codex_client::record_retry!(retry_count, delay, operation);
+        tokio::time::sleep(delay).await;
+        return Ok(());
+    }
 
     if turn_context
         .config
