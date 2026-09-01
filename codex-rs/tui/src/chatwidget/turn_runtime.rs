@@ -181,6 +181,7 @@ impl ChatWidget {
         self.clear_active_hook_cell();
         self.clear_guardian_review_status();
         self.turn_lifecycle.finish();
+        self.finish_safety_policy_recovery_turn();
         self.clear_safety_buffering();
         self.update_task_running_state();
         self.running_commands.clear();
@@ -313,6 +314,7 @@ impl ChatWidget {
     /// This does not clear MCP startup tracking, because MCP startup can overlap with turn cleanup
     /// and should continue to drive the bottom-pane running indicator while it is in progress.
     pub(super) fn finalize_turn(&mut self) {
+        self.finish_safety_policy_recovery_turn();
         self.clear_safety_buffering();
         // Drop preview-only stream tail content on any termination path before
         // failed-cell finalization, so transient tail cells are never persisted.
@@ -384,6 +386,7 @@ impl ChatWidget {
 
     pub(super) fn on_cyber_policy_error(&mut self) {
         self.input_queue.submit_pending_steers_after_interrupt = false;
+        let blocked_recovery_turn = self.finish_safety_policy_recovery_turn();
         self.finalize_turn();
         let plan_type = if self.has_chatgpt_account {
             self.plan_type
@@ -392,6 +395,10 @@ impl ChatWidget {
         };
         self.add_to_history(history_cell::new_cyber_policy_error_event(plan_type));
         self.request_redraw();
+
+        if !blocked_recovery_turn && self.maybe_submit_safety_policy_recovery() {
+            return;
+        }
 
         // After an error ends the turn, try sending the next queued input.
         self.maybe_send_next_queued_input();

@@ -413,11 +413,13 @@ use self::review::ReviewState;
 #[cfg(test)]
 pub(crate) use self::review_popups::show_review_commit_picker_with_entries;
 mod safety_buffering;
+mod safety_policy_recovery;
 mod service_tiers;
 mod settings;
 mod settings_popups;
 mod side;
 use self::safety_buffering::SafetyBufferingState;
+use self::safety_policy_recovery::SafetyPolicyRecoveryState;
 mod status_state;
 mod windows_sandbox_prompts;
 use self::status_state::StatusIndicatorState;
@@ -613,6 +615,7 @@ pub(crate) struct ChatWidget {
     unified_exec_wait_streak: Option<UnifiedExecWaitStreak>,
     turn_lifecycle: TurnLifecycleState,
     safety_buffering: SafetyBufferingState,
+    safety_policy_recovery: SafetyPolicyRecoveryState,
     task_complete_pending: bool,
     unified_exec_processes: Vec<UnifiedExecProcessSummary>,
     /// Tracks per-server MCP startup state while startup is in progress.

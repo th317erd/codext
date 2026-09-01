@@ -44,6 +44,7 @@ pub(crate) struct UserMessage {
 pub(super) enum UserMessageHistoryRecord {
     UserMessageText,
     Override(UserMessageHistoryOverride),
+    InternalSafetyPolicyRecovery,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -446,9 +447,9 @@ pub(super) fn user_message_for_restore(
             text_elements: history.text_elements.clone(),
             ..message
         },
-        UserMessageHistoryRecord::Override(_) | UserMessageHistoryRecord::UserMessageText => {
-            message
-        }
+        UserMessageHistoryRecord::Override(_)
+        | UserMessageHistoryRecord::InternalSafetyPolicyRecovery
+        | UserMessageHistoryRecord::UserMessageText => message,
     }
 }
 
@@ -461,6 +462,7 @@ pub(super) fn user_message_preview_text(
             history.text.clone()
         }
         Some(UserMessageHistoryRecord::Override(_))
+        | Some(UserMessageHistoryRecord::InternalSafetyPolicyRecovery)
         | Some(UserMessageHistoryRecord::UserMessageText)
         | None => message.text.clone(),
     }
@@ -515,6 +517,7 @@ pub(super) fn merge_user_messages_with_history_record(
                 }
                 UserMessageHistoryRecord::Override(_) if message.text.is_empty() => {}
                 UserMessageHistoryRecord::Override(_)
+                | UserMessageHistoryRecord::InternalSafetyPolicyRecovery
                 | UserMessageHistoryRecord::UserMessageText => {
                     append_history_segment(&message.text, message.text_elements.clone());
                 }
