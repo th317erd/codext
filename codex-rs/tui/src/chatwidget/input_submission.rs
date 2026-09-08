@@ -113,6 +113,11 @@ impl ChatWidget {
         history_record: UserMessageHistoryRecord,
         shell_escape_policy: ShellEscapePolicy,
     ) -> (bool, Option<AppCommand>) {
+        let turn_running_before_submit = self.turn_lifecycle.agent_turn_running;
+        self.record_user_submission_for_safety_policy_recovery(
+            &history_record,
+            turn_running_before_submit,
+        );
         if self.misalignment_policy_violation {
             return (false, None);
         }
@@ -432,9 +437,9 @@ impl ChatWidget {
             UserMessageHistoryRecord::Override(history) if !history.text.is_empty() => {
                 Some((&history.text, history.text_elements.as_slice()))
             }
-            UserMessageHistoryRecord::UserMessageText | UserMessageHistoryRecord::Override(_) => {
-                None
-            }
+            UserMessageHistoryRecord::InternalSafetyPolicyRecovery
+            | UserMessageHistoryRecord::UserMessageText
+            | UserMessageHistoryRecord::Override(_) => None,
         };
         if let Some((text, elements)) = history {
             self.append_message_history_entry(encode_history_mentions_at_elements(

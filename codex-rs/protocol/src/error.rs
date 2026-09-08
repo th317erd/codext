@@ -132,7 +132,7 @@ pub enum CodexErrorDetails {
     InvalidImageRequest(),
     #[error("{0}")]
     UsageLimitReached(UsageLimitReachedError),
-    #[error("Selected model is at capacity. Please try a different model.")]
+    #[error("Selected model is at capacity. Retrying automatically.")]
     ServerOverloaded,
     #[error("{message}")]
     CyberPolicy { message: String },
@@ -391,11 +391,11 @@ impl CodexErr {
             | CodexErrorDetails::Spawn
             | CodexErrorDetails::SessionConfiguredNotFirstEvent
             | CodexErrorDetails::UsageLimitReached(_)
-            | CodexErrorDetails::ServerOverloaded
             | CodexErrorDetails::CyberPolicy { .. }
             | CodexErrorDetails::MisalignmentPolicyViolation { .. } => false,
             CodexErrorDetails::Stream(..)
             | CodexErrorDetails::RateLimitExceeded(_)
+            | CodexErrorDetails::ServerOverloaded
             | CodexErrorDetails::Timeout
             | CodexErrorDetails::RequestTimeout
             | CodexErrorDetails::UnexpectedStatus(_)

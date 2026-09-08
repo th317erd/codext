@@ -1411,7 +1411,7 @@ impl Session {
             }
             InitialHistory::Resumed(resumed_history) => {
                 let turn_context = self.new_default_turn().await;
-                let rollout_items = resumed_history.history;
+                let rollout_items = Arc::unwrap_or_clone(resumed_history.history);
                 if matches!(
                     rollout_items.iter().rev().find_map(|item| match item {
                         RolloutItem::EventMsg(event) => agent_status_from_event(event),
@@ -1421,8 +1421,10 @@ impl Session {
                 ) {
                     self.agent_status.send_replace(AgentStatus::Interrupted);
                 }
+                let token_info = Self::last_token_info_from_rollout(&rollout_items);
+                let token_usage_record = Self::last_token_usage_record_from_rollout(&rollout_items);
                 let previous_turn_settings = self
-                    .apply_rollout_reconstruction(&turn_context, &rollout_items)
+                    .apply_owned_rollout_reconstruction(&turn_context, rollout_items)
                     .await;
 
                 // If resuming, warn when the last recorded model differs from the current one.
@@ -1447,12 +1449,11 @@ impl Session {
 
                 // Seed usage info from the recorded rollout so UIs can show token counts
                 // immediately on resume/fork.
-                if let Some(info) = Self::last_token_info_from_rollout(&rollout_items) {
+                if let Some(info) = token_info {
                     let mut state = self.state.lock().await;
                     state.set_token_info(Some(info));
                 }
-                self.state.lock().await.latest_token_usage_record =
-                    Self::last_token_usage_record_from_rollout(&rollout_items);
+                self.state.lock().await.latest_token_usage_record = token_usage_record;
 
                 // Defer seeding the session's initial context until the first turn starts so
                 // turn/start overrides can be merged before we write to the rollout.
@@ -1540,6 +1541,30 @@ impl Session {
         turn_context: &TurnContext,
         rollout_items: &[RolloutItem],
     ) -> Option<PreviousTurnSettings> {
+        let reconstruction = self
+            .reconstruct_history_from_rollout(turn_context, rollout_items)
+            .await;
+        self.apply_reconstructed_history(turn_context, reconstruction)
+            .await
+    }
+
+    async fn apply_owned_rollout_reconstruction(
+        &self,
+        turn_context: &TurnContext,
+        rollout_items: Vec<RolloutItem>,
+    ) -> Option<PreviousTurnSettings> {
+        let reconstruction = self
+            .reconstruct_history_from_rollout_owned(turn_context, rollout_items)
+            .await;
+        self.apply_reconstructed_history(turn_context, reconstruction)
+            .await
+    }
+
+    async fn apply_reconstructed_history(
+        &self,
+        turn_context: &TurnContext,
+        reconstruction: rollout_reconstruction::RolloutReconstruction,
+    ) -> Option<PreviousTurnSettings> {
         let rollout_reconstruction::RolloutReconstruction {
             mut history,
             guardian_history,
@@ -1550,9 +1575,7 @@ impl Session {
             first_window_id,
             previous_window_id,
             window_id,
-        } = self
-            .reconstruct_history_from_rollout(turn_context, rollout_items)
-            .await;
+        } = reconstruction;
         // Keep the recorded rollout unchanged. Prepare its reconstructed history before
         // installing it, so legacy media is processed once for this resume or fork and
         // will be processed again if the rollout is reconstructed in a future session.

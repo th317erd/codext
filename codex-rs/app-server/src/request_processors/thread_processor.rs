@@ -2205,7 +2205,7 @@ impl ThreadRequestProcessor {
         let (thread_history, resume_source_thread) = self
             .load_resume_initial_history_from_stored_thread(stored_thread)
             .await?;
-        let response_history = thread_history.clone();
+        let response_history = Self::metadata_only_response_history(&thread_history);
         let NewThread {
             thread_id: resumed_thread_id,
             thread: codex_thread,
@@ -3824,7 +3824,12 @@ impl ThreadRequestProcessor {
             config.model_reasoning_effort = None;
         }
 
-        let response_history = thread_history.clone();
+        let metadata_only_resume = paginated_resume && !include_turns && initial_turns_page.is_none();
+        let response_history = if metadata_only_resume {
+            Self::metadata_only_response_history(&thread_history)
+        } else {
+            thread_history.clone()
+        };
 
         match self
             .thread_manager
@@ -4399,6 +4404,19 @@ impl ThreadRequestProcessor {
                 .map(|item| RolloutItem::ResponseItem(item.into()))
                 .collect(),
         ))
+    }
+
+    fn metadata_only_response_history(thread_history: &InitialHistory) -> InitialHistory {
+        match thread_history {
+            InitialHistory::Resumed(resumed) => InitialHistory::Resumed(ResumedHistory {
+                conversation_id: resumed.conversation_id,
+                history: Arc::new(Vec::new()),
+                rollout_path: resumed.rollout_path.clone(),
+            }),
+            InitialHistory::New => InitialHistory::New,
+            InitialHistory::Cleared => InitialHistory::Cleared,
+            InitialHistory::Forked(items) => InitialHistory::Forked(items.clone()),
+        }
     }
 
     async fn load_resume_initial_history_from_stored_thread(
