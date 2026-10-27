@@ -136,6 +136,11 @@ impl ChatWidget {
         prepared_images: Option<Vec<UserInput>>,
     ) -> (bool, Option<AppCommand>) {
         self.bottom_pane.dismiss_composer_sparkle();
+        let turn_running_before_submit = self.turn_lifecycle.agent_turn_running;
+        self.record_user_submission_for_safety_policy_recovery(
+            &history_record,
+            turn_running_before_submit,
+        );
         if self.has_misalignment_policy_violation() {
             return (false, None);
         }
@@ -522,9 +527,9 @@ impl ChatWidget {
             UserMessageHistoryRecord::Override(history) if !history.text.is_empty() => {
                 Some((&history.text, history.text_elements.as_slice()))
             }
-            UserMessageHistoryRecord::UserMessageText | UserMessageHistoryRecord::Override(_) => {
-                None
-            }
+            UserMessageHistoryRecord::InternalSafetyPolicyRecovery
+            | UserMessageHistoryRecord::UserMessageText
+            | UserMessageHistoryRecord::Override(_) => None,
         };
         if let Some((text, elements)) = history {
             let reply_text = crate::async_question_reply::display_text(text);

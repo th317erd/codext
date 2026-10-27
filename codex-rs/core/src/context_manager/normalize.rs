@@ -13,6 +13,7 @@ use uuid::Uuid;
 use crate::context::ContextualUserFragment;
 use crate::context::UnsupportedMedia;
 use crate::util::error_or_panic;
+use tracing::error;
 use tracing::info;
 
 // Changing this value would change model-visible IDs and invalidate prompt caches.
@@ -94,9 +95,7 @@ pub(crate) fn ensure_call_outputs_present(items: &mut Vec<ResponseItemEnvelope>)
                     .as_ref()
                     .is_some_and(|metadata| metadata.inherited_user_message)
                 {
-                    error_or_panic(format!(
-                        "Custom tool call output is missing for call id: {call_id}"
-                    ));
+                    error!("Custom tool call output is missing for call id: {call_id}");
                 }
                 missing_outputs_to_insert.push((
                     idx,
@@ -122,9 +121,7 @@ pub(crate) fn ensure_call_outputs_present(items: &mut Vec<ResponseItemEnvelope>)
                     .as_ref()
                     .is_some_and(|metadata| metadata.inherited_user_message)
                 {
-                    error_or_panic(format!(
-                        "Local shell call output is missing for call id: {call_id}"
-                    ));
+                    error!("Local shell call output is missing for call id: {call_id}");
                 }
                 missing_outputs_to_insert.push((
                     idx,

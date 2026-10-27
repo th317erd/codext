@@ -36,6 +36,7 @@ use crate::render::line_utils::line_to_borrowed;
 use crate::render::line_utils::line_to_static;
 use crate::width::display_width;
 use crate::wrapping::RtOptions;
+use crate::wrapping::sanitize_line_for_reflow;
 
 // Destinations are repeated in every linked buffer cell. Leave oversized URLs as plain text.
 const MAX_HYPERLINK_DESTINATION_BYTES: usize = 8 * 1024;
@@ -237,6 +238,29 @@ pub(crate) fn visible_lines_ref(lines: &[HyperlinkLine]) -> Vec<Line<'_>> {
     lines
         .iter()
         .map(|line| line_to_borrowed(&line.line))
+        .collect()
+}
+
+pub(crate) fn sanitize_hyperlink_lines_for_reflow(
+    lines: Vec<HyperlinkLine>,
+) -> Vec<HyperlinkLine> {
+    lines
+        .into_iter()
+        .map(|mut hyperlink_line| {
+            let (line, sanitized) = sanitize_line_for_reflow(hyperlink_line.line);
+            hyperlink_line.line = line;
+            if sanitized {
+                hyperlink_line.hyperlinks.clear();
+            }
+            hyperlink_line
+        })
+        .collect()
+}
+
+pub(crate) fn sanitize_lines_for_reflow(lines: Vec<Line<'static>>) -> Vec<Line<'static>> {
+    lines
+        .into_iter()
+        .map(|line| sanitize_line_for_reflow(line).0)
         .collect()
 }
 

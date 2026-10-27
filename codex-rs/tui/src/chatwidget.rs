@@ -379,11 +379,13 @@ mod review;
 mod review_popups;
 use self::review::ReviewState;
 mod safety_buffering;
+mod safety_policy_recovery;
 mod service_tiers;
 mod settings;
 mod settings_popups;
 mod side;
 use self::safety_buffering::SafetyBufferingState;
+use self::safety_policy_recovery::SafetyPolicyRecoveryState;
 mod status_state;
 mod windows_sandbox_prompts;
 use self::status_state::StatusIndicatorState;
@@ -623,6 +625,7 @@ pub(crate) struct ChatWidget {
     realtime_conversation: RealtimeConversationUiState,
     realtime_conversation_available_for_thread: bool,
     safety_buffering: SafetyBufferingState,
+    safety_policy_recovery: SafetyPolicyRecoveryState,
     task_complete_pending: bool,
     unified_exec_processes: Vec<UnifiedExecProcessSummary>,
     /// Tracks per-server MCP startup state while startup is in progress.

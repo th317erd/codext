@@ -39,6 +39,100 @@ use crate::line_truncation::line_width;
 use crate::render::line_utils::push_owned_lines;
 use crate::width::display_width;
 
+const MAX_REFLOW_TOKEN_BYTES: usize = 8 * 1024;
+const MAX_REFLOW_LINE_BYTES: usize = 30 * 1024;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ReflowUnsafeReason {
+    DataUrl,
+    LongToken,
+    LongLine,
+}
+
+pub(crate) fn sanitize_line_for_reflow(line: Line<'static>) -> (Line<'static>, bool) {
+    let Some(sanitized) = sanitized_line_for_reflow(&line) else {
+        return (line, false);
+    };
+
+    (sanitized, true)
+}
+
+fn sanitized_line_for_reflow<'a>(line: &Line<'a>) -> Option<Line<'a>> {
+    let (reason, line_bytes) = reflow_unsafe_reason(line)?;
+    let span_style = line.spans.first().map(|span| span.style).unwrap_or_default();
+    let message = match reason {
+        ReflowUnsafeReason::DataUrl => {
+            format!("[data URL omitted from display: {line_bytes} bytes]")
+        }
+        ReflowUnsafeReason::LongToken => {
+            format!("[long token omitted from display: {line_bytes} bytes]")
+        }
+        ReflowUnsafeReason::LongLine => {
+            format!("[long line omitted from display: {line_bytes} bytes]")
+        }
+    };
+
+    Some(Line {
+        style: line.style,
+        alignment: line.alignment,
+        spans: vec![Span::styled(message, span_style)],
+    })
+}
+
+fn reflow_unsafe_reason(line: &Line<'_>) -> Option<(ReflowUnsafeReason, usize)> {
+    let line_bytes = line
+        .spans
+        .iter()
+        .map(|span| span.content.as_ref().len())
+        .sum();
+
+    let mut token_bytes = 0usize;
+    for span in &line.spans {
+        let text = span.content.as_ref();
+        for token in text.split_ascii_whitespace() {
+            if is_data_url_token(token) {
+                return Some((ReflowUnsafeReason::DataUrl, line_bytes));
+            }
+        }
+        for byte in text.bytes() {
+            if byte.is_ascii_whitespace() {
+                token_bytes = 0;
+            } else {
+                token_bytes += 1;
+                if token_bytes > MAX_REFLOW_TOKEN_BYTES {
+                    return Some((ReflowUnsafeReason::LongToken, line_bytes));
+                }
+            }
+        }
+    }
+
+    (line_bytes > MAX_REFLOW_LINE_BYTES).then_some((ReflowUnsafeReason::LongLine, line_bytes))
+}
+
+fn is_data_url_token(token: &str) -> bool {
+    let token = token.trim_matches(|ch: char| {
+        matches!(
+            ch,
+            '(' | ')'
+                | '['
+                | ']'
+                | '{'
+                | '}'
+                | '<'
+                | '>'
+                | ','
+                | '.'
+                | ';'
+                | '!'
+                | '\''
+                | '"'
+        )
+    });
+    token
+        .get(..5)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("data:"))
+}
+
 /// Projected text keeps source-offset lookup separate from legal grapheme split points.
 struct ProjectedText {
     text: String,
@@ -727,6 +821,14 @@ pub(crate) fn adaptive_wrap_line_with_source<'a>(
     line: &'a Line<'a>,
     base: RtOptions<'a>,
 ) -> Vec<WrappedLine<'a>> {
+    if let Some(sanitized) = sanitized_line_for_reflow(line) {
+        return vec![WrappedLine {
+            line: sanitized,
+            range: 0..0,
+            prefix_bytes: 0,
+        }];
+    }
+
     let (flat, span_bounds) = flatten_line(line);
     let mut saw_url = false;
     let mut saw_non_url = false;
@@ -917,6 +1019,14 @@ pub(crate) fn word_wrap_line_with_source<'a, O>(
 where
     O: Into<RtOptions<'a>>,
 {
+    if let Some(sanitized) = sanitized_line_for_reflow(line) {
+        return vec![WrappedLine {
+            line: sanitized,
+            range: 0..0,
+            prefix_bytes: 0,
+        }];
+    }
+
     let (flat, span_bounds) = flatten_line(line);
     word_wrap_flattened_line(line, &flat, &span_bounds, width_or_options.into())
 }

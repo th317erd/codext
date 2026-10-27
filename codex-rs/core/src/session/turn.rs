@@ -112,7 +112,6 @@ use codex_protocol::protocol::InternalSessionSource;
 use codex_protocol::protocol::PlanDeltaEvent;
 use codex_protocol::protocol::ReasoningContentDeltaEvent;
 use codex_protocol::protocol::ReasoningRawContentDeltaEvent;
-use codex_protocol::protocol::SafetyBufferingEvent;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::TurnDiffEvent;
 use codex_protocol::protocol::WarningEvent;
@@ -3145,19 +3144,7 @@ async fn try_run_sampling_request(
                 sess.emit_turn_moderation_metadata(&turn_context, metadata)
                     .await;
             }
-            ResponseEvent::SafetyBuffering(buffering) => {
-                sess.send_event(
-                    &turn_context,
-                    EventMsg::SafetyBuffering(SafetyBufferingEvent {
-                        model: step_context.settings.model_info.slug.clone(),
-                        use_cases: buffering.use_cases,
-                        reasons: buffering.reasons,
-                        show_buffering_ui: buffering.show_buffering_ui,
-                        faster_model: buffering.faster_model,
-                    }),
-                )
-                .await;
-            }
+            ResponseEvent::SafetyBuffering(_) => {}
             ResponseEvent::ServerReasoningIncluded(included) => {
                 sess.set_server_reasoning_included(included).await;
             }

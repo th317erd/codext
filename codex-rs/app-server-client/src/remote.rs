@@ -56,6 +56,7 @@ use tokio_tungstenite::connect_async_with_config;
 use tokio_tungstenite::tungstenite::Error as TungsteniteError;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::error::CapacityError;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::tungstenite::http::header::AUTHORIZATION;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
@@ -64,7 +65,7 @@ use url::Url;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const INITIALIZE_TIMEOUT: Duration = Duration::from_secs(10);
-const REMOTE_APP_SERVER_MAX_WEBSOCKET_MESSAGE_SIZE: usize = 128 << 20;
+const REMOTE_APP_SERVER_MAX_WEBSOCKET_MESSAGE_SIZE: usize = 512 << 20;
 // Tungstenite still needs an HTTP request URI for the WebSocket handshake;
 // the bytes travel over the Unix socket, not TCP.
 const UDS_WEBSOCKET_HANDSHAKE_URL: &str = "ws://localhost/rpc";
@@ -477,9 +478,7 @@ impl RemoteAppServerClient {
                             | Some(Ok(Message::Pong(_)))
                             | Some(Ok(Message::Frame(_))) => {}
                             Some(Err(err)) => {
-                                let message = format!(
-                                    "remote app server at `{endpoint}` transport failed: {err}"
-                                );
+                                let message = remote_transport_error_message(&endpoint, &err);
                                 let _ = deliver_event(
                                     &event_tx,
                                     AppServerEvent::Disconnected {
@@ -954,7 +953,8 @@ where
                 }
                 Some(Err(err)) => {
                     break Err(IoError::other(format!(
-                        "remote app server at `{endpoint}` transport failed during initialize: {err}"
+                        "{} (during initialize)",
+                        remote_transport_error_message(endpoint, &err)
                     )));
                 }
                 None => {
@@ -1038,6 +1038,16 @@ where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     let payload = serde_json::to_string(&message).map_err(IoError::other)?;
+    if payload.len() > REMOTE_APP_SERVER_MAX_WEBSOCKET_MESSAGE_SIZE {
+        return Err(IoError::new(
+            ErrorKind::InvalidData,
+            format!(
+                "refusing to send oversized JSON-RPC message to `{endpoint}`: {} exceeds websocket message cap {}",
+                display_bytes(payload.len()),
+                display_bytes(REMOTE_APP_SERVER_MAX_WEBSOCKET_MESSAGE_SIZE)
+            ),
+        ));
+    }
     stream
         .send(Message::Text(payload.into()))
         .await
@@ -1046,6 +1056,28 @@ where
                 "failed to write websocket message to `{endpoint}`: {err}"
             ))
         })
+}
+
+fn remote_transport_error_message(endpoint: &str, err: &TungsteniteError) -> String {
+    match err {
+        TungsteniteError::Capacity(CapacityError::MessageTooLong { size, max_size }) => {
+            format!(
+                "remote app server at `{endpoint}` sent an oversized websocket message ({} > {}). The session or event payload is too large for the remote transport; compact or repair the session before reconnecting.",
+                display_bytes(*size),
+                display_bytes(*max_size)
+            )
+        }
+        _ => format!("remote app server at `{endpoint}` transport failed: {err}"),
+    }
+}
+
+fn display_bytes(bytes: usize) -> String {
+    const MIB: usize = 1024 * 1024;
+    if bytes >= MIB {
+        format!("{:.1} MiB", bytes as f64 / MIB as f64)
+    } else {
+        format!("{bytes} bytes")
+    }
 }
 
 fn websocket_close_error_is_already_closed(err: &TungsteniteError) -> bool {

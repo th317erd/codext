@@ -337,7 +337,9 @@ struct PersistentActiveCellLayout<'a> {
 impl Renderable for TranscriptAreaRenderable<'_> {
     fn render(&self, area: Rect, buf: &mut Buffer) {
         let area = self.child_area(area);
-        let lines = self.child.display_hyperlink_lines(area.width);
+        let lines = crate::terminal_hyperlinks::sanitize_hyperlink_lines_for_reflow(
+            self.child.display_hyperlink_lines(area.width),
+        );
         let paragraph = HyperlinkParagraph::new(&lines, Style::default());
         let y = if area.height == 0 {
             0

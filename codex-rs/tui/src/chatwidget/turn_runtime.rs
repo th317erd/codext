@@ -189,6 +189,7 @@ impl ChatWidget {
         self.clear_active_hook_cell();
         self.clear_guardian_review_status();
         self.turn_lifecycle.finish();
+        self.finish_safety_policy_recovery_turn();
         self.status_state.program_status_after_turn = if from_replay {
             crate::terminal_program_status::ProgramStatus::Idle
         } else {
@@ -330,6 +331,7 @@ impl ChatWidget {
     /// This does not clear MCP startup tracking, because MCP startup can overlap with turn cleanup
     /// and should continue to drive the bottom-pane running indicator while it is in progress.
     pub(super) fn finalize_turn(&mut self) {
+        self.finish_safety_policy_recovery_turn();
         self.flush_answer_and_plan_streams();
         self.flush_interrupt_activity();
         self.finish_dynamic_activity();
@@ -424,6 +426,7 @@ impl ChatWidget {
             can_enable_daybreak,
         );
         self.input_queue.submit_pending_steers_after_interrupt = false;
+        let blocked_recovery_turn = self.finish_safety_policy_recovery_turn();
         self.finalize_turn();
         self.add_to_history(history_cell::new_cyber_policy_error_event(notice));
         if notice == crate::daybreak::Notice::Disabled
@@ -456,6 +459,10 @@ impl ChatWidget {
             self.defer_input_until_settings_applied();
         }
         self.request_redraw();
+
+        if !blocked_recovery_turn && self.maybe_submit_safety_policy_recovery() {
+            return;
+        }
 
         // After an error ends the turn, try sending the next queued input.
         self.maybe_send_next_queued_input();

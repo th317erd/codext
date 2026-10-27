@@ -24,6 +24,7 @@ use crate::key_hint::ShortcutHint;
 use crate::keymap::PagerKeymap;
 use crate::render::renderable::Renderable;
 use crate::terminal_hyperlinks::HyperlinkLine;
+use crate::terminal_hyperlinks::sanitize_lines_for_reflow;
 use crate::tui;
 use crate::tui::TuiEvent;
 use crossterm::event::KeyCode;
@@ -427,6 +428,7 @@ impl StaticOverlay {
         title: String,
         keymap: PagerKeymap,
     ) -> Self {
+        let lines = sanitize_lines_for_reflow(lines);
         let paragraph = Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false });
         Self::with_renderables(
             vec![Box::new(CachedRenderable::new(paragraph))],

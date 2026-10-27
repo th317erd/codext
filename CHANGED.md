@@ -1,63 +1,93 @@
 # Changes in This Fork
 
-This file captures the fork-specific behavior reapplied on top of the current upstream tag.
+This file is the requirements source for upstream reapplies. It has two parts:
 
-## TUI composer draft clipboard shortcut
+- **Applied** — behavior that exists on the current branch and must be re-implemented on every
+  new stable tag.
+- **Deferred** — older fork work that is *not* present in the current tree. Do not re-implement
+  it by accident; revisit it only with an explicit decision.
 
-- Added `Ctrl+Shift+C` in the TUI composer to copy the current draft to the system clipboard when the input contains text.
-- Existing `Ctrl+C` behavior stays unchanged.
-- When the composer has no copyable text, `Ctrl+Shift+C` falls back to the existing `Ctrl+C` clear/interrupt/quit path.
-- On WSL2, composer draft copy reuses the existing Windows clipboard fallback so copies still land in the Windows system clipboard.
-- `Ctrl+Shift+C` now takes its own composer-copy path instead of falling through to the existing `Ctrl+C` clear/interrupt/quit behavior when draft text is present.
-- Added footer shortcut help text for the new draft-copy binding.
+## Applied on `rust-v0.164.0`
 
-## TUI status header and polling
+### Safety buffering is not surfaced
 
-Implementation must follow the status-header skill .agents/skills/status-header/SKILL.md
+- `codex-rs/core/src/session/turn.rs` swallows `ResponseEvent::SafetyBuffering`: the turn loop
+  never emits `EventMsg::SafetyBuffering`.
+- Consequence: the TUI's safety-buffering status/retry UI stays dormant. Its upstream code is
+  kept as-is (no fork-side deletions) because no event ever reaches it.
+- Do not "fix" this by re-emitting the event; suppressing it is the fork behavior.
 
-- Added a status header above the composer in the app-server-backed `codex-rs/tui` surface. Segment order is fixed as model + reasoning effort, current directory, git branch/ahead/behind/changes, rate-limit remaining/reset time, then account identity.
-- Status header account identity is the last segment without an icon: ChatGPT accounts render as `user@example.com(Pro)` and API-key auth renders as `API key`.
-- Status header layout no longer adds its own top inset; it uses `Insets::tlbr(/*top*/ 0, …, /*bottom*/ 1, …)` and relies on the existing outer bottom-section gap above it so the spacing between `Working` and the header stays compact.
-- Git status is collected in the background (15s interval, 2s timeout) and rendered when available.
-- The directory segment represents the session/thread `cwd`, not a one-off tool `workdir`.
-- When the session `cwd` changes (for example after switching into a new worktree), the git-status poller now rebinds to that new `cwd`, clears stale git state, and ignores late results from the previous `cwd`.
-- ChatGPT `5h` / weekly usage-limit snapshots in the TUI now refresh in the background every 15 seconds, so the header and any `/statusline` limit items keep moving while the UI is otherwise idle.
+### Server-overloaded Responses requests retry once per second
 
-## TUI auth.json watcher
+- `codex-rs/core/src/responses_retry.rs` retries `CodexErrorDetails::ServerOverloaded` every
+  second with a user-visible "Selected model is at capacity; retrying in 1s" notice, before the
+  generic retry-budget gate, so a missing server `retry-after` hint no longer ends the turn.
+- `codex-rs/protocol/src/error.rs` renders that variant as "Selected model is at capacity.
+  Retrying automatically."
 
-- The running TUI now watches `CODEX_HOME/auth.json` and reloads auth when the file changes.
-- Watch notifications are now trailing-debounced so reload happens after writes settle, reducing partial-file reads.
-- If `auth.json` changes while the TUI still has an active task/turn running, auth reload is deferred until that work fully finishes; Codex does not hot-swap auth in the middle of the running task.
-- Auth reload failures no longer clear cached auth (so transient parse/read errors do not appear as a logout).
-- On auth reload failure, the TUI retries every 5 seconds for up to 3 attempts before surfacing a final warning.
-- When the account identity changes, the TUI surfaces a warning in the transcript (including old/new emails when available).
-- Auth change warnings now show the account plan type (e.g., Plus/Team/Free/Pro) instead of the generic ChatGPT label.
-- Rate-limit state and polling are refreshed after auth changes so the header reflects the new account.
-- That post-task auth refresh also resets cached rate-limit warning/prompt state for the new auth snapshot, so stale usage-limit/UI state from the previous auth context does not keep re-triggering after the reload.
-- The TUI now supports `[tui].usage_limit_resume_prompt` for the synthetic recovery user turn sent after `UsageLimitExceeded`. If the field is unset, Codext uses the built-in default recovery prompt; if the field is set to an empty string, Codext disables the automatic recovery turn.
-- When a turn hits `UsageLimitExceeded`, the TUI now queues that synthetic recovery turn ahead of other queued user input. If an `auth.json` reload is also pending, the reload still runs first, and only then does Codext submit the recovery turn before draining later queued inputs.
-- After a turn stops on `UsageLimitExceeded`, Codext now keeps that synthetic recovery turn parked until the next `auth.json` reload that actually changes account identity, so switching accounts can continue the interrupted task without a manual resend.
-- If the user manually submits a new message before that auth reload arrives, Codext clears the parked usage-limit recovery turn instead of replaying the stale synthetic prompt later.
+### Remote app-server transport hardening
 
-## TUI queued messages after usage-limit exhaustion
+- `codex-rs/app-server-client/src/remote.rs` raises the max WebSocket message size to 512 MiB,
+  rejects oversized outbound payloads with an explicit `InvalidData` error instead of failing
+  deep inside tungstenite, and reports transport failures through one shared
+  `remote_transport_error_message` helper (including during `initialize`).
 
-- When a turn ends because quota/rate limit is exhausted, Codext pauses queued-message autosend instead of draining already queued Tab follow-ups into more failed turns.
-- While autosend is paused, pressing Tab still queues new messages even when no turn is currently running.
-- When a later Codex rate-limit snapshot shows quota available again, Codext resumes autosend and submits exactly the first queued user message; any additional queued messages remain queued for normal FIFO draining after that turn completes.
-- If both a parked usage-limit recovery prompt and user-queued follow-ups exist when quota recovers, the user-queued follow-up wins and the stale synthetic recovery prompt is cleared.
+### Paginated resume sends metadata-only history
 
-## App-server auth.json account switching
+- `codex-rs/app-server/src/request_processors/thread_processor.rs`: a paginated `thread/resume`
+  without `includeTurns` and without an initial page no longer clones the full rollout into the
+  JSON-RPC response. The response carries thread metadata with an empty history; the persisted
+  revision is preserved.
 
-- The app-server now reloads auth from storage before `thread/start`, `thread/resume`, and `turn/start` when no turn is running.
-- This change supports Codex App account switching through [Loongphy/codex-auth#103](https://github.com/Loongphy/codex-auth/pull/103), allowing the app-server to pick up the newly selected account at the next safe request boundary.
-- Auth is still not hot-swapped in the middle of an active turn; reload is skipped while `running_turn_count` is nonzero and the next request boundary gets the new auth.
-- ChatGPT account/workspace switches inside the same auth mode are treated as auth changes by comparing the refresh-relevant auth snapshot, not only the top-level auth mode.
-- When a reload changes auth, loaded threads invalidate their cached model transport state so a reused WebSocket session created under the previous account is not used for the next turn.
-- The app-server also refreshes cloud requirements/default residency state and emits `AccountUpdated` after a changed reload so app UI account state follows the new snapshot.
-- Reapply notes: keep `reload_auth_from_storage_if_idle` wired into all three request entry points, preserve the idle guard, and preserve the invalidation chain `ThreadManager::invalidate_model_transport_caches` -> `CodexThread::invalidate_model_transport_cache` -> `ModelClient::invalidate_cached_transport_state`.
-- Reapply validation: run `cargo test --offline -p codex-login reload_detects_chatgpt_workspace_switch`, `cargo test -p codex-core invalidate_cached_transport_state_clears_cached_websocket_session`, and `cargo check --offline -p codex-app-server --lib` after merging upstream auth/app-server changes.
+### TUI reflow sanitizer
 
-## TUI exit resume command
+- `codex-rs/tui/src/wrapping.rs` gains `sanitize_line_for_reflow`: a line containing a `data:`
+  URL, a token over 8 KiB, or a line over 30 KiB is replaced by a short placeholder before
+  wrapping, and both `adaptive_wrap_line_with_source` and `word_wrap_line_with_source` short
+  circuit on it.
+- `codex-rs/tui/src/terminal_hyperlinks.rs` exposes `sanitize_hyperlink_lines_for_reflow` and
+  `sanitize_lines_for_reflow`; a sanitized line drops its terminal hyperlink metadata.
+- Applied at history-cell render/height and static pager content. Upstream's
+  `MAX_HYPERLINK_DESTINATION_BYTES` guard covers the oversized-destination half.
 
-- Added a fork requirement that user-facing resume hints use `codext resume <session>` / `codext resume <thread-name>` instead of `codex resume ...`.
-- This includes the final resume hint shown after exiting the TUI and other resume guidance surfaced inside the TUI.
+### Missing tool outputs degrade instead of panicking
+
+- `codex-rs/core/src/context_manager/normalize.rs` keeps upstream's inherited-call guard but logs
+  through `tracing::error!` instead of `error_or_panic` for a missing custom-tool or local-shell
+  output, so a preserved-prefix fork's snapshot cannot abort a debug build.
+
+### npm / release packaging
+
+- `@loongphy/codext` with the `codext` command, per
+  `.agents/skills/codex-upstream-reapply/references/npm-release.md`: fork `rust-release.yml`,
+  `codex-cli/{package.json,bin/codex.js,bin/rg,scripts/build_npm_package.py,scripts/install_native_deps.py}`,
+  and every upstream workflow the fork does not need deleted.
+
+## Deferred
+
+These sections describe fork work that is **absent** from every branch since
+`feat/rust-v0.144.3`. `README.md` still advertises the user-facing ones; the code does not
+implement them. Bring any of them back only as a deliberate decision.
+
+- **TUI status header and polling** — model/effort, cwd, git ahead/behind/changes, rate-limit
+  remaining, account identity above the composer. Former modules:
+  `chatwidget/status_header.rs` (up to `feat/rust-v0.141.0`). See
+  `.agents/skills/status-header/SKILL.md` for the layout rules; upstream now has its own
+  rate-limit and effort status surfaces, so re-implementing needs a fresh design pass.
+- **TUI composer draft clipboard shortcut** — `Ctrl+Shift+C` copies the draft, falling back to
+  the existing `Ctrl+C` path when empty.
+- **TUI auth.json watcher** — reload credentials on external `auth.json` writes, debounced,
+  deferred while a turn runs, with retry and an account-change warning.
+- **App-server auth.json account switching** — `reload_auth_from_storage_if_idle` at the
+  `thread/start`, `thread/resume`, and `turn/start` boundaries.
+- **TUI queued messages after usage-limit exhaustion** — pause queued-message autosend while
+  quota is exhausted, resume with exactly the first queued message when quota returns.
+- **`usage_limit_resume_prompt`** — `[tui].usage_limit_resume_prompt` config plus the synthetic
+  recovery turn parked until an auth change.
+- **`codext resume` hints** — user-facing resume guidance must say `codext resume <session>`.
+  Currently the tree still prints upstream's `codex resume ...`.
+- **Rollout-reconstruction ownership refactor** — superseded: upstream's reconstruction now
+  replays borrowed slices and moves the `Arc` on resume, so the fork's index-based lazy plan
+  bought nothing that this tag does not already do.
+- **Shell snapshot `shopt`/`extglob` capture** — superseded: upstream's bash snapshot script
+  already emits `shopt -p` before `declare -f`.

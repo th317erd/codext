@@ -457,6 +457,7 @@ pub(crate) enum AppEvent {
     },
 
     /// Interrupt, fork, and retry a safety-buffered turn with the server-selected model.
+    #[allow(dead_code)]
     RetrySafetyBufferedTurn {
         thread_id: ThreadId,
         turn_id: String,
